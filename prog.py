@@ -56,13 +56,8 @@ cursor = sql_server_connection.cursor()
 
 parser = ArgumentParser()
 
-parser.add_argument('-d', '--data', help="data", required=False)
-parser.add_argument('-t', '--temp_file_path', nargs='+', help="temporary_file", required=False)
-parser.add_argument('-o', '--outfile', help="Output data file for query result", required=False, default= 'enoch.xml')
+parser.add_argument('-o', '--outfile', help="Output data file for query result", required=False, default= 'Doc.xml')
 parser.add_argument('-id', '--ID', help="InvoiceID", required=False)
-parser.add_argument('-i', '--infile', help="Input file", required=False)
-parser.add_argument('-q', '--queries', help="queries", required=False)
-
 args = parser.parse_args()
 
 # Define SQL queries
@@ -206,12 +201,12 @@ if args.queries:
 
 if args.temp_file_path:
     args.temp_file_path = store_dict_to_tempfile(Data)
-    with open(args.temp_file_path, 'r') as temp_file:
-        outfile = temp_file.read()
+    # with open(args.temp_file_path, 'r') as temp_file:
+    #     outfile = temp_file.read()
     
     
-if args.outfile:
-    save_file_dialog(args.outfile)
+# if args.outfile:
+#     save_file_dialog(args.outfile)
 
 
 
