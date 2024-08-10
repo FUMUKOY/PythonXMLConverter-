@@ -1,22 +1,39 @@
-import os
-import xml.etree.ElementTree as ET
-import xml.dom.minidom
-from argparse import ArgumentParser
-import pyodbc
-import tempfile
-import shutil
-import os
-import tkinter as tk
-from tkinter import filedialog
 
-sql_server_name = '127.0.0.1,1533'
-database_name = 'STT'
-username = 'sa'
-password = '@DevelopmentPassword1'
+from argparse import ArgumentParser
+from dotenv import load_dotenv, find_dotenv
+import os
+import pyodbc
+import logging
+from DebugSetUp.SetupLogging import setup_logging
+
+# Find the .env file automatically
+dotenv_path = r'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\.env'
+
+# Load the .env file
+load_dotenv(dotenv_path)
+
+setup_logging()
+
+config = {
+    "db_host": os.getenv("DB_HOST"),
+    "db_port" : os.getenv('DB_PORT'),
+    "db_name": os.getenv("DB_NAME"),
+    "db_user": os.getenv("DB_USER"),
+    "db_password": os.getenv("DB_PASSWORD"),
+} 
+
+try:
+    connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={config["db_host"]};PORT={config["db_port"]};DATABASE={config["db_name"]};UID={config["db_user"]};PWD={config["db_password"]}'
+    sql_server_connection = pyodbc.connect(connection_string)
+    logging.info("Successfull connection")
+except  pyodbc.Error as e:
+    logging.error(f"Failed to connect to the database: {e}")
+
+
 Data = {}
 
 manufacturer_xml = """<M>
-    <CManufacturer>	<!-- This stays like that coz it inside the DataBase --> 
+    <CManufacturer>	
       <MANUF_ID>1</MANUF_ID>
       <MANUF_CODE>CC</MANUF_CODE>
       <MANUF_NAME>CellC</MANUF_NAME>
@@ -47,17 +64,11 @@ manufacturer_xml = """<M>
       <MANUF_NAME>Mobile Phones</MANUF_NAME>
     </CManufacturer>
   </M>"""
-
-
-connection_string = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={sql_server_name};DATABASE={database_name};UID={username};PWD={password}'
-sql_server_connection = pyodbc.connect(connection_string)
-
-cursor = sql_server_connection.cursor()
-
+   
+    
 parser = ArgumentParser()
-
-parser.add_argument('-o', '--outfile', help="Output data file for query result", required=False, default= 'Doc.xml')
-parser.add_argument('-id', '--ID', help="InvoiceID", required=False)
+parser.add_argument('-o', '--outfile', help="Output data file for query result", required=False, default='C:\\Users\\enochn\\Documents\\Doc.xml')
+parser.add_argument('-id', '--ID', type=int, help="InvoiceID", required=False, default=None)
 args = parser.parse_args()
 
 # Define SQL queries
@@ -73,7 +84,7 @@ queries = {
                 RIGHT(Products.ProductCode, 2) AS NEW_PROD_ID
         FROM InvoiceDetail
         INNER JOIN Products WITH (nolock) ON InvoiceDetail.ProductID = Products.ProductID
-        WHERE InvoiceDetail.InvoiceID = 2
+        WHERE InvoiceDetail.InvoiceID = {ID}  
         for xml path ('CProduct'), root ('P')
         """,
     'Q1': """
@@ -87,7 +98,7 @@ queries = {
                 'true' as [POSTED]
         FROM Invoice
         INNER JOIN Customer WITH (nolock) ON Invoice.CustomerID = Customer.CustomerID
-        WHERE Invoice.InvoiceID = 2
+        WHERE Invoice.InvoiceID = {ID}  
         for xml path ('H')
         """,
     'Q2': """
@@ -105,7 +116,7 @@ queries = {
                 'false' as PRELOAD_EXPORTED
         FROM InvoiceDetail
         INNER JOIN Products WITH (nolock) ON InvoiceDetail.ProductID = Products.ProductID
-        WHERE InvoiceDetail.InvoiceID = 2
+        WHERE InvoiceDetail.InvoiceID = {ID}  
         for xml path ('D')
         """,
     'Q3': """
@@ -120,93 +131,78 @@ queries = {
         INNER JOIN Products WITH (nolock)
         INNER JOIN BoxNumbers ON Products.ProductID = BoxNumbers.ProductID
         INNER JOIN SimStockMaster ON BoxNumbers.BoxID = SimStockMaster.BoxID ON InvoiceSimDetail.StockID = SimStockMaster.StockID
-        WHERE Invoice.InvoiceID = 2
+        WHERE Invoice.InvoiceID = {ID}  
         for xml path ('CInvItemSerial')
         """
 }
 
+cursor = sql_server_connection.cursor()
 # Execute queries and store results in Data dictionary.
 for query_name, query in queries.items():
-    cursor.execute(query)
-    Data[query_name] = cursor.fetchall()
-    
+    try:
+      cursor.execute(query.format(ID=args.ID))
+      Data[query_name] = cursor.fetchall()
+    except pyodbc.Error as e:
+        logging.error(f"Error executing query '{query_name}': {e}")
+
+
 
 def store_dict_to_tempfile(Data):
 
-    # with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
-    with open(args.outfile ,mode="w") as temp_file:
+    # with tempfile.NamedTemporaryFile(mode='w', delete=False) as file :
+    with open(args.outfile ,mode="w") as file :
         
         # Write the opening root element
-        temp_file.write('<CInvoiceExport xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n')
-        temp_file.write(manufacturer_xml)
+        file .write('<CInvoiceExport xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n')
+        file .write(manufacturer_xml)
         
         # Write the product data (P section)
         for query_value in Data['Q0']:
-            temp_file.write(query_value[0])
+            file .write(query_value[0])
         
         # Write the invoice data (H section)
         for query_value in Data['Q1']:
-            temp_file.write(query_value[0])
+            file .write(query_value[0])
 
         # Write the opening root1 element
-        temp_file.write('<I>\n')
+        file .write('<I>\n')
 
         # Write the opening root2 element
-        temp_file.write('<CInvoiceItemExport>\n')
+        file .write('<CInvoiceItemExport>\n')
 
         # Write the detailed invoice items data (D section)
         for query_value in Data['Q2']:
-            temp_file.write(query_value[0])
+            file .write(query_value[0])
             
-        temp_file.write('<S>\n')
+        file .write('<S>\n')
         # Write the remaining data
         for query_value in Data['Q3']:
-            temp_file.write(query_value[0])
-        temp_file.write('</S>\n')
+            file .write(query_value[0])
+        file .write('</S>\n')
 
         # Write the closing root2 element
-        temp_file.write('</CInvoiceItemExport>\n')
+        file .write('</CInvoiceItemExport>\n')
         
         # Write the closing root1 element
-        temp_file.write('</I>\n')
+        file .write('</I>\n')
         
         # Write the closing CInvoiceExport root element
-        temp_file.write('</CInvoiceExport>\n')
+        file .write('</CInvoiceExport>\n')
 
-        return temp_file.name
+        return file.name
     
-
-temp_file_path = store_dict_to_tempfile(Data)
-with open(temp_file_path, 'r') as temp_file:
-    outfile = temp_file.read()
-
-   
-def save_file_dialog(file_content):
-    root = tk.Tk()
-    root.withdraw()  # Hide the main window
-    file_path = filedialog.asksaveasfilename(defaultextension=".xml", filetypes=[("XML files", "*.xml")])
-    if file_path:
-        with open(file_path, 'w') as file:
-            file.write(file_content)
-        print("File saved successfully at:", file_path)
-    else:
-        print("Saving cancelled.")
+try:                 
+  file_path = store_dict_to_tempfile(Data)
+  logging.info(f"Data successfully exported to {file_path}")
+except Exception as e:
+    logging.error(f"An error occurred: {e}")
 
 
-if args.queries:
-    for query_name, query in queries.items():
-        cursor.execute(query)
-        Data[query_name] = cursor.fetchall()
 
 
-if args.temp_file_path:
-    args.temp_file_path = store_dict_to_tempfile(Data)
-    # with open(args.temp_file_path, 'r') as temp_file:
-    #     outfile = temp_file.read()
-    
-    
-# if args.outfile:
-#     save_file_dialog(args.outfile)
+
+
+
 
 
 
